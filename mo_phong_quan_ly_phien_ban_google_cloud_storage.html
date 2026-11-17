@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mô phỏng quản lý phiên bản tập tin | Google Cloud Storage</title>
+  <style>
+    :root { --ink:#17283b; --muted:#526277; --line:#dbe5ed; --blue:#116ab4; --red:#b34242; --green:#1e7e54; }
+    * { box-sizing:border-box; }
+    html { font-family:Montserrat,Inter,"Segoe UI",Arial,sans-serif; font-size:17px; }
+    body { margin:0; background:#f3f7fa; color:var(--ink); }
+    .page { max-width:1250px; margin:auto; padding:20px 25px 25px; }
+    button,select { font:inherit; border-radius:0; }
+    button { padding:13px 17px; border:2px solid var(--blue); background:var(--blue); color:#fff; font-size:.90rem; font-weight:750; cursor:pointer; }
+    button:hover:not(:disabled) { background:#084b84; }
+    button:disabled, select:disabled { opacity:.45; cursor:not-allowed; }
+    button.danger { background:var(--red); border-color:var(--red); }
+    button.danger:hover:not(:disabled) { background:#892c2c; }
+    button.secondary { background:#fff; color:var(--blue); }
+    button.secondary:hover:not(:disabled) { background:#e9f3fc; }
+    button:focus-visible, select:focus-visible { outline:3px solid #e8b148; outline-offset:2px; }
+    .controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:16px; }
+    .selectgroup { display:flex; align-items:center; flex-wrap:wrap; gap:8px; background:#fff; border:1px solid #d4e4f3; padding:7px; }
+    .selectgroup label { font-size:.84rem; font-weight:750; color:#335676; padding-left:4px; }
+    .selectgroup select { min-width:166px; padding:12px 10px; border:2px solid #9abedb; background:white; color:var(--ink); font-size:.86rem; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .panel { background:#fff; border:1px solid var(--line); padding:22px; min-height:265px; }
+    .panelhead { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-bottom:14px; border-bottom:2px solid var(--line); margin-bottom:15px; }
+    h2 { font-size:1.18rem; line-height:1.35; margin:0; }
+    .subtitle { color:var(--muted); font-size:.81rem; margin-top:4px; }
+    .chip { background:#e8f2fb; color:#115b99; font-size:.73rem; padding:7px 10px; font-weight:800; text-transform:uppercase; white-space:nowrap; }
+    .record { border:1px solid var(--line); background:#fff; padding:16px; margin-bottom:10px; }
+    .record.highlight { border:2px solid #7eb9e4; padding:15px; }
+    .recordhead { display:flex; justify-content:space-between; align-items:center; gap:8px; font-weight:800; flex-wrap:wrap; }
+    .metadata { display:grid; gap:8px; font-size:.89rem; margin-top:11px; }
+    .metadata strong { font-variant-numeric:tabular-nums; }
+    .tag { font-size:.74rem; font-weight:800; text-transform:uppercase; padding:5px 9px; border:1px solid; white-space:nowrap; }
+    .tag.live { background:#e9f8ef; color:#176746; border-color:#a7dcc0; }
+    .tag.old { background:#faf2df; color:#6a5a35; border-color:#e8d5a9; }
+    .empty { padding:28px 14px; background:#fbfdff; border:2px dashed var(--line); color:var(--muted); text-align:center; font-size:.94rem; }
+    .result { margin-top:16px; padding:18px 20px; border-left:5px solid var(--blue); background:#edf6ff; line-height:1.6; }
+    .result strong { color:#0d548e; }
+    .footnote { color:#657487; font-size:.77rem; margin:13px 0 0; line-height:1.5; }
+    .footnote a { color:#115b99; }
+    @media (max-width:850px) { .page { padding:14px; } .grid { grid-template-columns:1fr; } .panel { min-height:unset; } .controls { gap:8px; } button { padding:11px 12px; } }
+    @media print { .controls { display:none; } .page { max-width:none; } .panel { break-inside:avoid; } }
+  </style>
+</head>
+<body>
+<main class="page">
+  <div class="controls" aria-label="Các bước demo">
+    <button id="upload1">1. Tải bản đầu tiên</button>
+    <button id="upload2">2. Ghi đè bằng bản mới</button>
+    <button id="deleteDefault" class="danger">3A. Xóa KHÔNG chọn Generation</button>
+    <div class="selectgroup">
+      <label for="generationSelect">Chọn Generation:</label>
+      <select id="generationSelect" aria-label="Chọn Generation cần xóa"><option value="">Chọn mã</option></select>
+      <button id="deleteSpecific" class="danger">3B. Xóa CÓ chọn Generation</button>
+    </div>
+    <button id="compare" class="secondary">↔ Thử cách xóa khác</button>
+    <button id="reset" class="secondary">↺ Làm lại từ đầu</button>
+  </div>
+
+  <div class="grid">
+    <section class="panel" aria-label="Phiên bản hiện hành">
+      <div class="panelhead">
+        <div><h2>Danh sách tập tin hiện tại</h2><div class="subtitle">Chỉ hiển thị bản Live</div></div>
+        <span class="chip" id="liveCount">0 bản Live</span>
+      </div>
+      <div id="liveList" aria-live="polite"></div>
+    </section>
+    <section class="panel" aria-label="Danh sách phiên bản">
+      <div class="panelhead">
+        <div><h2>Lịch sử tất cả phiên bản</h2><div class="subtitle">Hiển thị cả Live và Noncurrent</div></div>
+        <span class="chip" id="historyCount">0 phiên bản</span>
+      </div>
+      <div id="historyList" aria-live="polite"></div>
+    </section>
+  </div>
+  <section class="result" id="result" aria-live="polite">Nhấn <strong>1. Tải bản đầu tiên</strong> để bắt đầu.</section>
+  <p class="footnote">Demo mô phỏng · Mã 1001 và 1003 chỉ là ví dụ · Giả định Soft Delete tắt. Quy tắc: <a href="https://docs.cloud.google.com/storage/docs/object-versioning" target="_blank" rel="noopener noreferrer">Google Cloud Storage — Object Versioning</a>.</p>
+</main>
+<script>
+  'use strict';
+  const get = (id) => document.getElementById(id);
+  let stage = 0; // 0: chưa tải, 1: bản đầu, 2: hai bản, 3: xóa không chỉ định, 4: xóa có chỉ định
+  let deletedGen = null;
+  let chosenGen = '1001';
+  const original = [
+    { gen:'1003', content:'Bài tập lần 2', status:'Live' },
+    { gen:'1001', content:'Bài tập lần 1', status:'Noncurrent' },
+  ];
+
+  function currentVersions() {
+    if (stage === 0) return [];
+    if (stage === 1) return [{ gen:'1001', content:'Bài tập lần 1', status:'Live' }];
+    if (stage === 2) return original.map(v => ({...v}));
+    if (stage === 3) return original.map(v => ({...v, status:'Noncurrent'}));
+    return original.filter(v => v.gen !== deletedGen).map(v => ({...v}));
+  }
+
+  function showRecord(v, highlight=false) {
+    const isLive = v.status === 'Live';
+    return `<article class="record${highlight?' highlight':''}">
+      <div class="recordhead"><span>▤ BaiTap.txt</span><span class="tag ${isLive?'live':'old'}">${v.status}</span></div>
+      <div class="metadata"><div>Generation Number: <strong>${v.gen}</strong></div><div>Nội dung: <strong>${v.content}</strong></div></div>
+    </article>`;
+  }
+  function message() {
+    if (stage === 0) return 'Nhấn <strong>1. Tải bản đầu tiên</strong> để bắt đầu.';
+    if (stage === 1) return '<strong>Bước 1:</strong> Bản 1001 là phiên bản hiện tại (Live).';
+    if (stage === 2) return '<strong>Bước 2:</strong> Bản 1001 thành Noncurrent; bản mới 1003 là Live. Hãy thử một trong hai cách xóa.';
+    if (stage === 3) return '<strong>3A — Không chọn Generation:</strong> Bản Live 1003 chuyển thành <strong>Noncurrent</strong>, <strong>giữ nguyên mã 1003</strong>. Không còn bản Live. <strong>Đây là đáp án C.</strong>';
+    return deletedGen === '1001'
+      ? '<strong>3B — Chọn Generation 1001:</strong> Chỉ bản 1001 bị xóa. Bản 1003 vẫn là <strong>Live</strong>.'
+      : '<strong>3B — Chọn Generation 1003:</strong> Bản 1003 bị xóa theo mã đã chọn, <strong>không chuyển thành Noncurrent</strong>. Bản 1001 vẫn là Noncurrent.';
+  }
+
+  function render() {
+    const versions = currentVersions();
+    const live = versions.filter(v => v.status === 'Live');
+    get('liveList').innerHTML = live.length ? live.map(v => showRecord(v)).join('') : '<div class="empty">Không có tập tin Live</div>';
+    get('historyList').innerHTML = versions.length ? versions.map(v => showRecord(v, stage === 3 && v.gen === '1003')).join('') : '<div class="empty">Chưa có phiên bản nào</div>';
+    get('liveCount').textContent = `${live.length} bản Live`;
+    get('historyCount').textContent = `${versions.length} phiên bản`;
+    get('result').innerHTML = message();
+    get('upload1').disabled = stage !== 0;
+    get('upload2').disabled = stage !== 1;
+    get('deleteDefault').disabled = stage !== 2;
+    get('compare').disabled = stage !== 3 && stage !== 4;
+    const select = get('generationSelect');
+    select.innerHTML = stage === 2
+      ? '<option value="1001">1001 — Noncurrent</option><option value="1003">1003 — Live</option>'
+      : '<option value="">Chọn mã</option>';
+    if (stage === 2) select.value = chosenGen;
+    select.disabled = stage !== 2;
+    get('deleteSpecific').disabled = stage !== 2;
+  }
+  get('upload1').addEventListener('click', () => { stage = 1; render(); });
+  get('upload2').addEventListener('click', () => { stage = 2; render(); });
+  get('deleteDefault').addEventListener('click', () => { stage = 3; render(); });
+  get('generationSelect').addEventListener('change', e => { chosenGen = e.target.value; });
+  get('deleteSpecific').addEventListener('click', () => {
+    if (stage !== 2 || !['1001','1003'].includes(chosenGen)) return;
+    deletedGen = chosenGen;
+    stage = 4;
+    render();
+  });
+  get('compare').addEventListener('click', () => { stage = 2; deletedGen = null; render(); });
+  get('reset').addEventListener('click', () => { stage = 0; deletedGen = null; chosenGen = '1001'; render(); });
+  render();
+</script>
+</body>
+</html>
